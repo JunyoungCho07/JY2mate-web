@@ -59,15 +59,18 @@ def get_video_info(url, cookie_filepath):
     except yt_dlp.utils.DownloadError as e:
         return {"error": str(e)}
 
+# 기존 download_content 함수를 아래 코드로 전체 교체해주세요.
+
 def download_content(url, download_type, quality, container, is_playlist, cookie_filepath):
     """
-    유튜브 콘텐츠를 다운로드하는 통합 함수.
-    재생목록과 단일 파일을 모두 처리하고, 결과를 (데이터, 파일명, MIME타입) 튜플로 반환.
+    유튜브 콘텐츠를 다운로드하는 통합 함수 (수정된 버전).
+    extract_info와 download를 분리하지 않고 한 번에 처리하여 안정성 향상.
     """
     with tempfile.TemporaryDirectory() as temp_dir:
         download_path = os.path.join(temp_dir, "downloads")
         os.makedirs(download_path)
 
+        # --- ydl_opts 설정은 이전과 거의 동일 ---
         ydl_opts = {
             'outtmpl': os.path.join(download_path, '%(playlist_index)s - %(title)s.%(ext)s' if is_playlist else '%(title)s.%(ext)s'),
             'quiet': True,
@@ -93,10 +96,46 @@ def download_content(url, download_type, quality, container, is_playlist, cookie
                 'merge_output_format': container,
             })
         
+        # --- 핵심 수정: extract_info와 download를 분리하지 않음 ---
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+                # download=True (기본값)로 한 번에 정보 추출 및 다운로드 실행
+                info_dict = ydl.extract_info(url, download=True)
+
+                # --- 파일 이름 결정 로직 수정 ---
+                # 단일 파일일 경우, info_dict에서 최종 파일 경로를 가져옴
+                if not is_playlist:
+                    # 후처리가 있는 오디오의 경우, 요청된 파일 경로를 사용
+                    if download_type == '오디오' and info_dict.get('requested_downloads'):
+                        final_filepath = info_dict['requested_downloads'][0]['filepath']
+                    else:
+                        # 'filepath' 키가 없을 경우를 대비하여 outtmpl로부터 파일명을 재구성
+                        final_filepath = ydl.prepare_filename(info_dict)
+                    
+                    # 파일이 실제로 존재하는지 확인
+                    if not os.path.exists(final_filepath):
+                        # 후처리로 확장자가 바뀐 경우를 대비하여 다운로드 폴더에서 직접 찾기
+                        found = False
+                        for f in os.listdir(download_path):
+                            if f.startswith(info_dict['title']):
+                                final_filepath = os.path.join(download_path, f)
+                                found = True
+                                break
+                        if not found:
+                            raise FileNotFoundError("다운로드된 파일을 찾을 수 없습니다.")
+                    
+                    display_name = os.path.basename(final_filepath)
+                    with open(final_filepath, "rb") as f:
+                        file_data = f.read()
+                    
+                    mime_type_map = {'mp4': 'video/mp4', 'mkv': 'video/x-matroska', 'mp3': 'audio/mpeg', 'flac': 'audio/flac', 'm4a': 'audio/mp4', 'wav': 'audio/wav'}
+                    mime_type = mime_type_map.get(os.path.splitext(display_name)[1].lower().strip('.'), 'application/octet-stream')
+                    
+                    return file_data, display_name, mime_type
+
+        # --- 오류 처리 부분은 이전과 동일 ---
         except yt_dlp.utils.DownloadError as e:
+            # (이하 오류 처리 코드는 그대로 유지)
             error_message = str(e)
             if "Video unavailable" in error_message:
                 raise ValueError("영상을 찾을 수 없습니다. 삭제, 비공개, 국가 제한 등의 원인일 수 있습니다.")
@@ -107,27 +146,20 @@ def download_content(url, download_type, quality, container, is_playlist, cookie
         except Exception as e:
             raise RuntimeError(f"알 수 없는 오류가 발생했습니다: {e}")
 
+        # --- 재생목록 처리 로직 ---
         downloaded_files = os.listdir(download_path)
         if not downloaded_files:
             raise FileNotFoundError("다운로드된 파일이 없습니다. URL을 다시 확인하거나, 재생목록의 모든 영상이 유효한지 확인해주세요.")
 
-        if is_playlist:
-            zip_path = os.path.join(temp_dir, "playlist.zip")
-            with zipfile.ZipFile(zip_path, 'w') as zipf:
-                for file in downloaded_files:
-                    zipf.write(os.path.join(download_path, file), arcname=file)
-            
-            with open(zip_path, "rb") as f:
-                return f.read(), "playlist.zip", "application/zip"
-        else:
-            final_filepath = os.path.join(download_path, downloaded_files[0])
-            display_name = downloaded_files[0]
-            with open(final_filepath, "rb") as f:
-                file_data = f.read()
-            mime_type_map = {'mp4': 'video/mp4', 'mkv': 'video/x-matroska', 'mp3': 'audio/mpeg', 'flac': 'audio/flac', 'm4a': 'audio/mp4', 'wav': 'audio/wav'}
-            mime_type = mime_type_map.get(container, 'application/octet-stream')
-            return file_data, display_name, mime_type
-
+        # 재생목록이면 압축하여 반환
+        zip_path = os.path.join(temp_dir, "playlist.zip")
+        with zipfile.ZipFile(zip_path, 'w') as zipf:
+            for file in downloaded_files:
+                zipf.write(os.path.join(download_path, file), arcname=file)
+        
+        with open(zip_path, "rb") as f:
+            return f.read(), "playlist.zip", "application/zip"
+        
 def get_image_base64(image_path):
     """이미지 파일을 Base64로 인코딩하여 반환합니다."""
     try:
