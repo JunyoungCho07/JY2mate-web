@@ -175,7 +175,6 @@ def run_app():
     st.markdown("<p>유튜브 영상과 오디오를 간편하게 다운로드하세요.</p><br>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center;'>Developed by JunyoungCho</p>", unsafe_allow_html=True)
 
-    # << [수정 4] UI 경고 메시지를 Secrets 기준으로 변경
     if "YOUTUBE_COOKIES" not in st.secrets or not st.secrets["YOUTUBE_COOKIES"]:
         st.warning("⚠️ Secrets에 쿠키 정보(YOUTUBE_COOKIES)가 없습니다. 다운로드 실패 확률이 높습니다.")
     st.info(f"ℹ️ 현재 yt-dlp 버전: {yt_dlp.version.__version__}")
@@ -207,14 +206,17 @@ def run_app():
             if url:
                 with st.spinner(f"다운로드를 시작합니다..."):
                     try:
-                        # << [수정 3] 함수 호출 시 cookie_filepath 인자 제거
                         file_data, display_name, mime_type = download_content(
                             url, download_type, quality, container, is_playlist
                         )
                         st.success(f"**{display_name}** 처리가 완료되었습니다!")
+                        
+                        # [수정 완료] mime=type -> mime=mime_type
                         st.download_button(
                             label=f"📥 '{display_name}' 다운로드",
-                            data=file_data, file_name=display_name, mime=type,
+                            data=file_data,
+                            file_name=display_name,
+                            mime=mime_type,
                             use_container_width=True
                         )
                     except Exception as e:
@@ -226,7 +228,6 @@ def run_app():
         if st.button("상세 정보 확인", use_container_width=True):
             if url:
                 with st.spinner("유튜브로부터 상세 정보를 가져오는 중..."):
-                    # << [수정 3] 함수 호출 시 cookie_filepath 인자 제거
                     info = get_video_info(url)
                     if "error" in info:
                         st.error("정보를 가져오는 데 실패했습니다.")
