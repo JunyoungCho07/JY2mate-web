@@ -55,22 +55,23 @@ def get_video_info(url):
 def download_content(url, download_type, quality, container, temp_dir):
     """사용자 선택에 따라 유튜브 콘텐츠를 다운로드하는 통합 함수 (단일 파일 전용)."""
 
-    # 파일 이름 템플릿: 공백 등 특수문자로 인한 오류 방지를 위해 %(id)s 사용
     output_template = os.path.join(temp_dir, '%(title)s [%(id)s].%(ext)s')
     
-    # ------------------ ydl_opts 설정 ------------------
+    # ------------------ ydl_opts 설정 (핵심 수정) ------------------
     ydl_opts = {
         'outtmpl': output_template,
-        'noplaylist': True,  # 재생목록 다운로드 방지
+        'noplaylist': True,
         'quiet': True,
         'noprogress': True,
-        # 네트워크 타임아웃 등 예외 처리 강화
         'retries': 10,
         'fragment_retries': 10,
+        # --- 추가된 부분: 일반 브라우저처럼 보이게 하기 위한 User-Agent ---
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+        },
     }
 
     if download_type == '오디오':
-        # 오디오 전용 옵션
         ydl_opts.update({
             'format': 'bestaudio/best',
             'postprocessors': [{
@@ -78,39 +79,28 @@ def download_content(url, download_type, quality, container, temp_dir):
                 'preferredcodec': container,
                 'preferredquality': quality,
             }],
-            # 오디오 추출 후 원본 비디오 파일 삭제
             'keepvideo': False, 
         })
     else:  # '영상'
-        # 영상 전용 옵션
         quality_filter = f'[height<=?{quality.replace("p", "")}]' if quality != 'best' else ''
         ydl_opts.update({
-            # mp4 포맷이 호환성이 가장 좋으므로 우선 시도
             'format': f'bestvideo{quality_filter}[ext=mp4]+bestaudio[ext=m4a]/bestvideo{quality_filter}+bestaudio/best',
             'merge_output_format': container,
         })
 
-    # ------------------ 다운로드 실행 및 파일 경로 처리 ------------------
+    # --- (이하 다운로드 로직은 이전과 동일) ---
     final_filepath = None
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # 1. 먼저 정보만 추출하여 파일 이름을 예측
             info_dict = ydl.extract_info(url, download=False)
-            
-            # 2. 정보 추출 후 다운로드 실행
             ydl.download([url])
 
-            # 3. 다운로드된 파일 경로 찾기
-            # ydl.prepare_filename은 옵션을 기반으로 최종 파일명을 생성해줌
-            # 오디오의 경우 확장자가 container(mp3, flac 등)로 바뀜
             if download_type == '오디오':
-                 # 원본 확장자를 오디오 컨테이너로 변경하여 파일 경로 재구성
                 base_filename, _ = os.path.splitext(ydl.prepare_filename(info_dict))
                 final_filepath = f"{base_filename}.{container}"
             else:
                 final_filepath = ydl.prepare_filename(info_dict)
 
-            # 파일이 실제로 존재하는지 최종 확인
             if not os.path.exists(final_filepath):
                  raise FileNotFoundError(f"예상 경로에 파일이 없습니다: {final_filepath}")
 
@@ -118,13 +108,14 @@ def download_content(url, download_type, quality, container, temp_dir):
         error_message = str(e)
         if "Video unavailable" in error_message or "is not available" in error_message:
             raise ValueError("영상을 찾을 수 없습니다. 삭제, 비공개, 국가 제한 등의 원인일 수 있습니다.")
+        # --- 403 오류에 대한 명확한 안내 추가 ---
+        elif "HTTP Error 403: Forbidden" in error_message:
+            raise ValueError("유튜브에서 다운로드를 차단했습니다 (오류 403). 잠시 후 다시 시도하거나 다른 영상으로 테스트해주세요.")
         else:
             raise ValueError(f"다운로드 중 오류가 발생했습니다: {error_message}")
     except Exception as e:
-        # 그 외 예외 처리
         raise RuntimeError(f"알 수 없는 오류가 발생했습니다: {e}")
 
-    # ------------------ 결과 반환 ------------------
     if not final_filepath or not os.path.exists(final_filepath):
         raise FileNotFoundError(f"다운로드 후 '{container}' 파일을 찾을 수 없습니다. 다시 시도해주세요.")
     
