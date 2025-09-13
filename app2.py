@@ -52,22 +52,37 @@ def get_video_info(url):
         # 오류 발생 시, 오류 메시지 텍스트를 반환
         return {"error": str(e)}
 
-
 def download_content(url, download_type, quality, container, temp_dir):
-    """사용자 선택에 따라 유튜브 콘텐츠를 다운로드하는 통합 함수."""
+    """사용자 선택에 따라 유튜브 콘텐츠를 다운로드하는 통합 함수 (단일 파일 전용)."""
     final_filepath = None
     
+    # --- 핵심 수정: 'noplaylist': True 옵션을 추가하여 재생목록 다운로드를 방지 ---
     if download_type == '오디오':
         postprocessors = [{'key': 'FFmpegExtractAudio', 'preferredcodec': container, 'preferredquality': quality}]
-        ydl_opts = {'format': 'bestaudio/best', 'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'), 'postprocessors': postprocessors, 'quiet': True, 'noprogress': True}
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+            'postprocessors': postprocessors,
+            'noplaylist': True, # 재생목록 다운로드 방지
+            'quiet': True,
+            'noprogress': True
+        }
     else: # '영상'
         quality_filter = f'[height<=?{quality.replace("p", "")}]' if quality != 'best' else ''
-        ydl_opts = {'format': f'bestvideo{quality_filter}+bestaudio/best', 'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'), 'merge_output_format': container, 'quiet': True, 'noprogress': True}
+        ydl_opts = {
+            'format': f'bestvideo{quality_filter}+bestaudio/best',
+            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+            'merge_output_format': container,
+            'noplaylist': True, # 재생목록 다운로드 방지
+            'quiet': True,
+            'noprogress': True
+        }
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(url, download=True)
             
+            # 단일 파일이므로 info_dict에서 직접 경로를 찾습니다.
             if info_dict.get('requested_downloads'):
                  final_filepath = info_dict['requested_downloads'][0]['filepath']
             else:
@@ -93,15 +108,28 @@ def download_content(url, download_type, quality, container, temp_dir):
     mime_type = mime_type_map.get(container, 'application/octet-stream')
 
     return final_filepath, display_name, mime_type
+def get_image_base64(image_path):
+    """이미지 파일을 Base64로 인코딩하여 반환합니다."""
+    import base64
+    try:
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    except FileNotFoundError:
+        return None
 
 # --------------------------------------------------------------------------
 # 3. Streamlit UI 및 로직 구현 (진단 기능 버튼 추가)
 # --------------------------------------------------------------------------
 
 def run_app():
+    """메인 애플리케이션을 실행하는 함수"""
+    image_path = "JYC_clear.png"
+    image_base64 = get_image_base64(image_path)
+    if image_base64:
+        st.markdown(f"""<div style="text-align: center;"><img src="data:image/png;base64,{image_base64}" alt="로고" style="width:180px; margin-bottom: 20px;"></div>""", unsafe_allow_html=True)
     st.title("🎬 JY2mate")
     st.markdown("<p>유튜브 영상과 오디오를 간편하게 다운로드하세요.</p><br>", unsafe_allow_html=True)
-    
+    st.markdown("<p style='text-align: center;'>Developed by JunyoungCho</p>", unsafe_allow_html=True)
     url = st.text_input("다운로드할 YouTube URL을 입력하세요.", placeholder="https://www.youtube.com/watch?v=...")
 
     col1, col2, col3 = st.columns(3)
