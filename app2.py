@@ -54,60 +54,86 @@ def get_video_info(url):
 
 def download_content(url, download_type, quality, container, temp_dir):
     """사용자 선택에 따라 유튜브 콘텐츠를 다운로드하는 통합 함수 (단일 파일 전용)."""
-    final_filepath = None
+
+    # 파일 이름 템플릿: 공백 등 특수문자로 인한 오류 방지를 위해 %(id)s 사용
+    output_template = os.path.join(temp_dir, '%(title)s [%(id)s].%(ext)s')
     
-    # --- 핵심 수정: 'noplaylist': True 옵션을 추가하여 재생목록 다운로드를 방지 ---
+    # ------------------ ydl_opts 설정 ------------------
+    ydl_opts = {
+        'outtmpl': output_template,
+        'noplaylist': True,  # 재생목록 다운로드 방지
+        'quiet': True,
+        'noprogress': True,
+        # 네트워크 타임아웃 등 예외 처리 강화
+        'retries': 10,
+        'fragment_retries': 10,
+    }
+
     if download_type == '오디오':
-        postprocessors = [{'key': 'FFmpegExtractAudio', 'preferredcodec': container, 'preferredquality': quality}]
-        ydl_opts = {
+        # 오디오 전용 옵션
+        ydl_opts.update({
             'format': 'bestaudio/best',
-            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-            'postprocessors': postprocessors,
-            'noplaylist': True, # 재생목록 다운로드 방지
-            'quiet': True,
-            'noprogress': True
-        }
-    else: # '영상'
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': container,
+                'preferredquality': quality,
+            }],
+            # 오디오 추출 후 원본 비디오 파일 삭제
+            'keepvideo': False, 
+        })
+    else:  # '영상'
+        # 영상 전용 옵션
         quality_filter = f'[height<=?{quality.replace("p", "")}]' if quality != 'best' else ''
-        ydl_opts = {
-            'format': f'bestvideo{quality_filter}+bestaudio/best',
-            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+        ydl_opts.update({
+            # mp4 포맷이 호환성이 가장 좋으므로 우선 시도
+            'format': f'bestvideo{quality_filter}[ext=mp4]+bestaudio[ext=m4a]/bestvideo{quality_filter}+bestaudio/best',
             'merge_output_format': container,
-            'noplaylist': True, # 재생목록 다운로드 방지
-            'quiet': True,
-            'noprogress': True
-        }
-    
+        })
+
+    # ------------------ 다운로드 실행 및 파일 경로 처리 ------------------
+    final_filepath = None
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(url, download=True)
+            # 1. 먼저 정보만 추출하여 파일 이름을 예측
+            info_dict = ydl.extract_info(url, download=False)
             
-            # 단일 파일이므로 info_dict에서 직접 경로를 찾습니다.
-            if info_dict.get('requested_downloads'):
-                 final_filepath = info_dict['requested_downloads'][0]['filepath']
+            # 2. 정보 추출 후 다운로드 실행
+            ydl.download([url])
+
+            # 3. 다운로드된 파일 경로 찾기
+            # ydl.prepare_filename은 옵션을 기반으로 최종 파일명을 생성해줌
+            # 오디오의 경우 확장자가 container(mp3, flac 등)로 바뀜
+            if download_type == '오디오':
+                 # 원본 확장자를 오디오 컨테이너로 변경하여 파일 경로 재구성
+                base_filename, _ = os.path.splitext(ydl.prepare_filename(info_dict))
+                final_filepath = f"{base_filename}.{container}"
             else:
-                 final_filepath = info_dict.get('filepath') or os.path.join(temp_dir, f"{info_dict['title']}.{container}")
+                final_filepath = ydl.prepare_filename(info_dict)
+
+            # 파일이 실제로 존재하는지 최종 확인
+            if not os.path.exists(final_filepath):
+                 raise FileNotFoundError(f"예상 경로에 파일이 없습니다: {final_filepath}")
 
     except yt_dlp.utils.DownloadError as e:
         error_message = str(e)
         if "Video unavailable" in error_message or "is not available" in error_message:
-            raise ValueError("영상을 찾을 수 없습니다. 삭제, 비공개, 국가 제한 등의 원인일 수 있습니다. [상세 정보 확인] 버튼으로 원인을 파악해보세요.")
+            raise ValueError("영상을 찾을 수 없습니다. 삭제, 비공개, 국가 제한 등의 원인일 수 있습니다.")
         else:
-            raise ValueError(f"다운로드에 실패했습니다: {error_message}")
+            raise ValueError(f"다운로드 중 오류가 발생했습니다: {error_message}")
+    except Exception as e:
+        # 그 외 예외 처리
+        raise RuntimeError(f"알 수 없는 오류가 발생했습니다: {e}")
 
-
+    # ------------------ 결과 반환 ------------------
     if not final_filepath or not os.path.exists(final_filepath):
-        found_files = [f for f in os.listdir(temp_dir) if f.endswith(container)]
-        if found_files:
-            final_filepath = os.path.join(temp_dir, found_files[0])
-        else:
-            raise FileNotFoundError(f"다운로드 후 '{container}' 파일을 찾을 수 없습니다. 일시적인 오류일 수 있으니 다시 시도해주세요.")
-
+        raise FileNotFoundError(f"다운로드 후 '{container}' 파일을 찾을 수 없습니다. 다시 시도해주세요.")
+    
     display_name = os.path.basename(final_filepath)
     mime_type_map = {'mp4': 'video/mp4', 'mkv': 'video/x-matroska', 'mp3': 'audio/mpeg', 'flac': 'audio/flac', 'm4a': 'audio/mp4', 'wav': 'audio/wav'}
     mime_type = mime_type_map.get(container, 'application/octet-stream')
 
     return final_filepath, display_name, mime_type
+
 def get_image_base64(image_path):
     """이미지 파일을 Base64로 인코딩하여 반환합니다."""
     import base64
