@@ -15,7 +15,7 @@ from contextlib import contextmanager # << [수정 1] contextmanager 임포트
 # --------------------------------------------------------------------------
 st.set_page_config(
     page_title="JY2mate | YouTube Downloader",
-    page_icon="🎬",
+    page_icon="JYC_clear.png",
     layout="centered",
     initial_sidebar_state="auto"
 )
