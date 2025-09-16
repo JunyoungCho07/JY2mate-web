@@ -183,14 +183,16 @@ def run_app():
 
     col1, col2 = st.columns([1, 2])
     with col1:
-        is_playlist = st.checkbox("재생목록 전체 다운로드")
+        # is_playlist = st.checkbox("재생목록 전체 다운로드")
+        is_playlist = False  # << [수정 3] 재생목록 다운로드 옵션 제거
     with col2:
         download_type = st.radio("다운로드 타입", ('영상', '오디오'), horizontal=True, label_visibility="collapsed")
 
     col_quality, col_container = st.columns(2)
     with col_quality:
         if download_type == '영상':
-            quality = st.selectbox("화질 선택", ('best', '1080p', '720p', '480p'))
+            # quality = st.selectbox("화질 선택", ('best', '1080p', '720p', '480p'))
+            quality = st.selectbox("화질 선택", ('1080p', '720p', '480p')) # << [수정 4] 'best' 옵션 제거
         else: # 오디오
             quality = st.selectbox("음질 선택 (kbps)", ('192', '320', '128'))
     with col_container:
